@@ -1,0 +1,91 @@
+{
+  "StartAt": "FirstChoiceState",
+  "States": {
+    "FirstChoiceState": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Payload.state",
+          "StringEquals": "pending",
+          "Next": "MapState"
+        },
+        {
+          "Variable": "$.Payload.state",
+          "StringEquals": "done",
+          "Next": "Exit"
+        }
+      ]
+    },
+    "Exit": {
+      "Type": "Pass",
+      "End": true
+    },
+    "MapState": {
+      "Type": "Map",
+      "End": true,
+      "InputPath": "$.Payload.list",
+      "Iterator": {
+        "StartAt": "ProcessPayload",
+        "States": {
+          "ProcessPayload": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+              "FunctionName": "${lambda_arn}",
+              "Payload.$": "$"
+            },
+            "ResultPath": "$",
+            "ResultSelector": {
+              "Payload.$": "$.Payload"
+            },
+            "Next": "ChoiceState",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "MaxAttempts": 2
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "ProcessingFailed"
+              }
+            ]
+          },
+          "ProcessingFailed": {
+            "Type": "Fail"
+          },
+          "ChoiceState": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.Payload.state",
+                "StringEquals": "pending",
+                "Next": "IsPendingState"
+              },
+              {
+                "Variable": "$.Payload.state",
+                "StringEquals": "done",
+                "Next": "Completed"
+              }
+            ]
+          },
+          "IsPendingState": {
+            "Type": "Wait",
+            "Seconds": 15,
+            "Next": "ProcessPayload"
+          },
+          "Completed": {
+            "Type": "Pass",
+            "End": true
+          }
+        }
+      },
+      "MaxConcurrency": 1
+    }
+  }
+}

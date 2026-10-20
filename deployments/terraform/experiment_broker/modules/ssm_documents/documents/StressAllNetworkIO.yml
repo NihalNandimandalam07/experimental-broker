@@ -1,0 +1,70 @@
+---
+description: Blackhole all Inbound and Outbound Network Traffic
+schemaVersion: '2.2'
+parameters:
+  duration:
+    type: String
+    description: The duration - in seconds - of the test.
+    default: "60"
+  installDependencies:
+    type: String
+    description: "If set to True, Systems Manager installs the required dependencies on the target instances. (default: True)."
+    default: 'True'
+    allowedValues:
+      - 'True'
+      - 'False'
+mainSteps:
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: installDependencies
+    description: |
+      ## Parameter: installDependencies
+      If set to True, this step installs the required dependecy via operating system's repository. It supports both
+      Debian (apt) and CentOS (yum) based package managers.  In this case iptables is being installed and an attempt is
+      made to start the service.  iptables should always be installed on the os by default, so this should never happen.
+    inputs:
+      runCommand:
+        - |
+          #!/bin/bash
+          if  [[ "{{ installDependencies }}" == True ]] ; then
+            if [[ "$( which iptables 2>/dev/null )" ]] ; then echo Dependency is already installed. ; exit ; fi
+            echo "Installing required dependencies"
+            if [ -f  "/etc/system-release" ] ; then
+              if sudo cat /etc/system-release | grep -i 'Amazon Linux' ; then
+                sudo amazon-linux-extras install testing
+                sudo yum -y install iptables-services
+                sudo systemctl start iptables
+                sudo systemctl start ip6tables
+                sudo systemctl enable iptables
+                sudo systemctl enable ip6tables
+              else
+                echo "There was a problem installing dependencies."
+                exit 1
+              fi
+            elif sudo cat /etc/issue | grep -i Ubuntu ; then
+              sudo apt-get update -y
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables
+              sudo ufw enable
+            else
+              echo "There was a problem installing dependencies."
+              exit 1
+            fi
+          fi
+  - action: aws:runShellScript
+    name: AlterIPtables
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 120
+      runCommand:
+      - |
+        #!/bin/bash
+          sudo iptables -I INPUT -m state --state NEW -j DROP
+          sudo iptables -I OUTPUT -m state --state NEW -j DROP
+          sudo iptables -I FORWARD -m state --state NEW -j DROP 
+          sudo sleep {{ duration }}s
+          sudo iptables -D INPUT -m state --state NEW -j DROP
+          sudo iptables -D OUTPUT -m state --state NEW -j DROP
+          sudo iptables -D FORWARD -m state --state NEW -j DROP 

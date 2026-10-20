@@ -1,0 +1,59 @@
+version: 1.0.0
+title: Demo-Kubernetes(EKS)-Worker Node (Pod)-State-Termination/Crash
+description: This experiment will Terminate an eks pod to simulate a crash or accidental termination
+configuration:
+  target: "experiment-demo.activities.verticalrelevancelabs.com"
+  intensity: 1000
+  alarm_name: "Experiment-Demo Health"
+  alarm_state: "ALARM"
+  aws_region: 'us-east-1'
+  cluster_name: "experiment-eks"
+  name_space: "experiment-demo"
+  pod_name_pattern: "experiment-demo"
+  num_pods_to_kill: "1"
+
+steady-state-hypothesis:
+    title: Check Service Status is Healthy
+    probes:
+      - type: probe
+        name: all-services-are-healthy
+        tolerance: true
+        provider:
+          type: python
+          module: activities.k8s.probes
+          func: assert_pod_healthy
+          arguments:
+            cluster_name: ${cluster_name}
+            namespace: ${name_space}
+            pod_name: ${pod_name_pattern}
+method:
+  - type: action
+    name: Introduce load to experiment-demo
+    background: true
+    provider:
+      type: python
+      module: activities.load.actions
+      func: load_generate_demo
+      arguments:
+        target: ${target}
+        intensity: ${intensity}
+  - type: action
+    name: Terminate an Pod within EKS
+    provider:
+      type: python
+      module: activities.k8s.actions
+      func: kill_pods
+      arguments:
+        cluster_name: ${cluster_name}
+        name_space: ${name_space}
+        pod_name_pattern: ${pod_name_pattern}
+        num_pods_to_kill: ${num_pods_to_kill}
+  - type: probe
+    name: Check Alarm State
+    provider:
+      type: python
+      module: activities.cloudwatch.probes
+      func: probe_alarm_state
+      arguments:
+        alarm_name: ${alarm_name}
+        alarm_state: ${alarm_state}

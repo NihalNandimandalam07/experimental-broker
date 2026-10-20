@@ -1,0 +1,33 @@
+---
+description: |
+  ### Document name - AWSFIS-EBS-Volume-Crash
+  ## What does this document do?
+  It unmounts and Detach an EBS Volume with a command.
+  ## Input Parameters
+  * Device: (Required) Name of the Volume to unmount.
+  * InstanceId: The InstanceId to be whose volume is to be detached
+  ## Output Parameters
+  None.
+schemaVersion: '2.2'
+parameters:
+  device:
+    type: String
+    description: "(Required) Name of the Device to detach, using the `umount` command"
+    allowedPattern: '^[0-9a-zA-Z.\-=_/]{1,128}$'
+mainSteps:
+  - action: aws:runShellScript
+    name: DetachVolume
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    description: |
+      ## Parameters: Device
+      This step will attempt to detach the volume, using the linux 'umount' command.
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 120
+      runCommand:
+        - |
+          sudo umount -l {{ device }}
+          echo Done with command: "DetachVolume"

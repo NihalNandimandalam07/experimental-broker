@@ -1,0 +1,121 @@
+---
+description: |
+  ## What does this document do?
+  It adds latency on the network.
+  ## Input Parameters
+  * Interface: The interface to add delay to (default: eth0).
+  * Delay: The delay - in milliseconds - to add to the interface (default: 200).
+  * Duration: The duration - in seconds - of the test (default: 60).
+  * InstallDependencies: If set to True, Systems Manager installs the required dependencies on the target instances. (default: True).
+
+schemaVersion: '2.2'
+parameters:
+  interface:
+    type: String
+    description: "The interface to add delay to (default: eth0)."
+    default: "eth0"
+  ports:
+    type: String
+    description: The port numbers separated by a space on which to induce the network latency.
+    default: "0"
+    allowedPattern: "^[0-9]+$"
+  portType:
+    type: String
+    description: |
+      The port type on which to induce the network latency. (default:sport).
+      The allowed values are: dport, sport.
+    default: "sport"
+  delay:
+    type: String
+    description: "The delay - in milliseconds - to add to the interface (default: 100)."
+    default: "100"
+  duration:
+    type: String
+    description: "The duration - in seconds - of the test (default: 60)."
+    default: "60"
+  installDependencies:
+    type: String
+    description: "If set to True, Systems Manager installs the required dependencies on the target instances. (default: True)."
+    default: 'True'
+mainSteps:
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: installDependencies
+    description: |
+      ## Parameter: InstallDependencies
+      If set to True, this step installs the required dependecy via operating system's repository. It supports both
+      Debian (apt) and CentOS (yum) based package managers.
+    inputs:
+      runCommand:
+        - |
+          #!/bin/bash
+          if  [[ "{{ installDependencies }}" == True ]] ; then
+            if [[ "$( which tc 2>/dev/null )" ]] ; then echo Dependency is already installed. ; exit ; fi
+            echo "Installing required dependencies"
+            if [ -f  "/etc/system-release" ] ; then
+              if sudo cat /etc/system-release | grep -i 'Amazon Linux' ; then
+                sudo amazon-linux-extras install testing
+                sudo yum -y install tc
+              else
+                echo "There was a problem installing dependencies."
+                exit 1
+              fi
+            elif sudo cat /etc/issue | grep -i Ubuntu ; then
+              sudo apt-get update -y
+              sudo DEBIAN_FRONTEND=noninteractive sudo apt-get install -y iproute2
+            else
+              echo "There was a problem installing dependencies."
+              exit 1
+            fi
+          fi
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: AlterNetworkInterface
+    description: |
+      ## Parameters: interface, delay and duration
+      This step adds a `Delay` (in milliseconds) to `Interface` for the given `Duration` (in seconds), using the `tc` (Traffic Control) command.
+      The script will inject latency on the network, and wait for the given duration to remove that.
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 120
+      runCommand:
+        - |
+          sudo -s -H <<'EOF'
+
+          echo "interface" = {{ interface }}
+          echo "delay" = {{ delay }}
+          echo "portType" = {{ portType }}
+          echo "ports" = {{ ports }}
+          echo "duration" = {{ duration }}
+
+          echo "Injecting latency..."
+          if  [[ "{{ ports }}" == 0 ]] ; then
+            sudo tc qdisc add dev {{ interface }} root netem delay {{ delay }}ms
+            echo "Before sleep..."
+            sleep {{ duration }}s
+            echo "After sleep..."
+            echo "Before removing network latency..."
+            sudo tc qdisc del dev {{ interface }} root
+            echo "After removing network latency..."
+          else
+            for port in {{ ports }}; do
+              tc qdisc add dev {{ interface }} root handle 1: prio priomap 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+              tc qdisc add dev {{ interface }} parent 1:2 handle 20: netem delay '{{ delay }}ms'
+              tc filter add dev {{ interface }} parent 1:0 protocol ip u32 match ip '{{portType}}' $port 0xffff flowid 1:2
+              done
+          
+            echo "Before sleep..."
+            sleep {{ duration }}s
+            echo "After sleep..."
+            tc qdisc del dev {{ interface }} root
+            echo "Before removing network latency..."
+            tc qdisc del dev {{ interface }} root
+            echo "After removing network latency..."
+          fi
+          EOF

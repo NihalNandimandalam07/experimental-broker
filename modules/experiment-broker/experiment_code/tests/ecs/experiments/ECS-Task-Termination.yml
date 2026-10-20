@@ -1,0 +1,88 @@
+version: 1.0.0
+title: ECS-Task-Termination
+description: This experiment will terminate a task in ECS cluster to simulate a crash or accidental termination
+configuration:
+  aws_region: "us-east-1"
+  cluster_name: "experiment-broker-test"
+  tag_key: "Testing"
+  tag_value: "True"
+  task_discovery_desired_status: "RUNNING"
+  task_bucket_name: "experiment-broker-test-state-bucket" 
+  rollback_bucket_name: "experiment-broker-test-rollback-bucket"
+  task_arn_file_name: "ecs_task_termination_targets.json"
+  assert_task_healthy_retry: True
+  assert_task_failed_retry: True
+  assert_task_failed_retry_max_duration: 120
+  halt_task_target_type: "ALL" 
+  halt_task_reason: "Testing halt task"
+  halt_task_state_file_name: "ecs_task_termination_state_rollback.json"
+  time_to_wait_for_ecs_remediation: 120
+
+steady-state-hypothesis:
+  title: Check if Task Status is Running
+  probes:
+    - type: shared
+      name: Get Tasks ARNs by Tag and store in S3
+      provider:
+        type: python
+        module: activities.ecs.shared
+        func: get_task_arns_by_tag
+        arguments:
+          region: ${aws_region}
+          cluster_name: ${cluster_name}
+          tag_key: ${tag_key}
+          tag_value: ${tag_value}
+          task_desired_status: ${task_discovery_desired_status}
+          task_arn_bucket_name: ${task_bucket_name}
+          task_arn_file_name: ${task_arn_file_name}
+    - type: probe
+      name: Indentify Task Desired Status and Last Status as as Running via S3 Target File
+      tolerance: true
+      provider:
+        type: python
+        module: activities.ecs.probes
+        func: assert_tasks_healthy
+        arguments:
+          region: ${aws_region}
+          cluster_name: ${cluster_name}
+          targets_bucket_name: ${task_bucket_name}
+          targets_file_name: ${task_arn_file_name}
+          retry: ${assert_task_healthy_retry}
+
+method:
+  - type: action
+    name: Terminate ECS Task
+    provider:
+      type: python
+      module: activities.ecs.actions
+      func: halt_tasks_execution
+      arguments:
+        region: ${aws_region}
+        cluster_name: ${cluster_name}
+        test_target_type: ${halt_task_target_type}
+        targets_bucket_name: ${task_bucket_name}
+        targets_file_name: ${task_arn_file_name} 
+        reason: "${halt_task_reason}"
+        state_bucket_name: ${rollback_bucket_name}
+        state_file_name: ${halt_task_state_file_name}
+  - type: probe
+    name: Check Task Status is Stopped via S3 Target File
+    provider:
+      type: python
+      module: activities.ecs.probes
+      func: assert_tasks_failed
+      arguments:
+        region: ${aws_region}
+        cluster_name: ${cluster_name}
+        targets_bucket_name: ${task_bucket_name}
+        targets_file_name: ${halt_task_state_file_name}
+        retry: ${assert_task_failed_retry}
+        max_duration_to_iterate: ${assert_task_failed_retry_max_duration}
+  - type: action
+    name: Wait for ECS to remediate the tasks
+    provider:
+      type: python
+      module: activities.ecs.actions
+      func: wait_for_remediation
+      arguments:
+        seconds: ${time_to_wait_for_ecs_remediation}

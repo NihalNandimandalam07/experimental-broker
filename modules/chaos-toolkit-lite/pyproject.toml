@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "vr_runner_lite"
+version = "0.0.1"
+dependencies = [
+    "requests>=2.31.0",
+    "pyyaml"
+]
+
+[tool.setuptools.packages.find]
+include = ["vr_runner_lite*"]

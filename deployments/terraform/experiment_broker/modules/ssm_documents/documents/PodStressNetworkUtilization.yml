@@ -1,0 +1,161 @@
+---
+description: |
+  ## What does this document do?
+  It simulates high network utilization by limiting bandwidth on the network
+  on one or 2 Core DNS Containers
+   on an instance via utilizing the stress-ng tool.
+  ## Input Parameters
+  * Interface: The interface to add delay to (default: eth0).
+  * Rate: The outgoing rate - in kbits - to set to the interface (default: 1024).
+  * Duration: The duration - in seconds - of the test (default: 60).
+  * Port Number:
+  * Port Type: Source port or destination port.
+  * InstallDependencies: If set to True, Systems Manager installs the required dependencies on the target instances. (default: True).
+
+schemaVersion: '2.2'
+parameters:
+  interface:
+    type: String
+    description: "The interface to add delay to (default: eth0)."
+    default: "eth0"
+    allowedPattern: '^[0-9a-zA-Z\-]{1,15}$'
+  iomix:
+    type: String
+    description: 'Specify the number of mixed IO stressors to use (default 1)'
+    default: "1"
+    allowedPattern: "^[0-9]+$"
+  portNumber:
+    type: String
+    description: |
+      The port number on which to limit the bandwidth. (default:80).
+      The allowed values are:
+      * PortNumber: The Port No on which the network bandwidth is to be limited.
+    default: "0"
+    allowedPattern: "^[0-9]+$"
+  portType:
+    type: String
+    description: |
+      The port type on which to limit the bandwith. (default:sport).
+      The allowed values are: dport, sport.
+    default: "sport"
+    allowedValues:
+      - dport
+      - sport
+  rate:
+    type: String
+    description: "The outgoing rate - in kbits - to add to set the interface (default: 1024)."
+    default: "1024"
+    allowedPattern: "^[0-9]+$"
+  duration:
+    type: String
+    description: "The duration - in seconds - of the test (default: 60)."
+    default: "60"
+    allowedPattern: "^[0-9]+$"
+  installDependencies:
+    type: String
+    description: "If set to True, Systems Manager installs the required dependencies on the target instances. (default: True)."
+    default: 'True'
+    allowedValues:
+      - 'True'
+      - 'False'
+  containerNamePattern:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z_]{1,128}$'
+    default: 'k8s_coredns'
+  percent:
+    type: String
+    description: 'Specify the percentage of the available bandwidth used by each stressor. (default 80)'
+    default: "80"
+    allowedPattern: "^[0-9]+$"
+  numContainersToTarget:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z]{1,128}$'
+    default: '1'
+mainSteps:
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: installDependencies
+    description: |
+      ## Parameter: InstallDependencies
+      If set to True, this step installs the required dependecy via operating system's repository. It supports both
+      Debian (apt) and CentOS (yum) based package managers.
+    inputs:
+      runCommand:
+        - |
+          #!/bin/bash
+          if  [[ "{{ installDependencies }}" == True ]] ; then
+            if [[ "$( which tc 2>/dev/null )" ]] ; then echo Dependency is already installed. ; exit ; fi
+            echo "Installing required dependencies"
+            if [ -f  "/etc/system-release" ] ; then
+              if sudo cat /etc/system-release | grep -i 'Amazon Linux' ; then
+                sudo amazon-linux-extras install testing
+                sudo yum -y install tc
+              else
+                echo "There was a problem installing dependencies."
+                exit 1
+              fi
+            elif sudo cat /etc/issue | grep -i Ubuntu ; then
+              sudo apt-get update -y
+              sudo DEBIAN_FRONTEND=noninteractive sudo apt-get install -y iproute2
+            else
+              echo "There was a problem installing dependencies."
+              exit 1
+            fi
+          fi
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: AlterNetworkInterface
+    description: |
+      ## Parameters: interface, delay and duration
+      This step changes the outgoing rate (in kbits) to `Interface` for the given `Duration` (in seconds),
+      using the `tc` (Traffic Control) command.  The script will limit the outgoing bandwidth on the network,
+      and wait for the given duration to remove that.
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 120
+      runCommand:
+        - |
+          sudo -s -H <<'EOF'
+
+          if [ {{ duration }} -lt 1 ] || [ {{ duration }} -gt 43200 ] ; then echo Duration parameter value must be between 1 and 43200 seconds && exit; fi
+
+          echo {{ containerNamePattern }}
+
+          firstCoreDNSPid=$(docker ps -q | xargs docker inspect --format '{{.State.Pid}}, {{.Name}}' | awk '/{{ containerNamePattern }}/{print $1}' | awk 'NR==1{print $1}' | sed 's/,//')
+          echo "${firstCoreDNSPid}"
+          secondCoreDNSPid=$(docker ps -q | xargs docker inspect --format '{{.State.Pid}}, {{.Name}}' | awk '/{{ containerNamePattern }}/{print $1}' | awk 'NR==2{print $1}' | sed 's/,//')
+          echo "${secondCoreDNSPid}"
+
+          if [ -z "$firstCoreDNSPid" ]
+          then
+            echo "firstCoreDNSPid is NULL"
+            exit 0
+          fi
+
+          echo "Injecting high network utilization ..."
+          nsenter -t ${firstCoreDNSPid} -n sudo stress-ng --iomix {{ iomix }} --iomix-bytes {{ percent }}% -t {{ duration }}s 
+          nsenter -t ${firstCoreDNSPid} -n sudo tc qdisc add dev {{ interface }} root tbf rate {{ rate }}kbit latency 50ms burst 1540
+          nsenter -t ${firstCoreDNSPid} -n sudo sleep {{ duration }}s
+          nsenter -t ${firstCoreDNSPid} -n sudo tc qdisc del dev {{ interface }} root
+          echo "Finished injecting high network utilization ..."
+
+          if  [[ "{{ numContainersToTarget}}" == '2' ]] ; then
+            echo "Two containers are being targeted on this test..."
+
+            echo "Injecting high network utilization ..."
+            nsenter -t ${firstCoreDNSPid} -n sudo stress-ng --iomix {{ iomix }} --iomix-bytes {{ percent }}% -t {{ duration }}s 
+            nsenter -t ${firstCoreDNSPid} -n sudo tc qdisc add dev {{ interface }} root tbf rate {{ rate }}kbit latency 50ms burst 1540
+            nsenter -t ${firstCoreDNSPid} -n sudo sleep {{ duration }}s
+            nsenter -t ${firstCoreDNSPid} -n sudo tc qdisc del dev {{ interface }} root
+            echo "Finished injecting high network utilization ..."
+          fi
+
+          EOF

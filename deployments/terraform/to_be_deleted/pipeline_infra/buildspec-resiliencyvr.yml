@@ -1,0 +1,26 @@
+version: 0.2
+env:
+  variables:
+    DOMAIN_NAME: $DOMAIN_NAME
+    OWNER: $OWNER
+    REPO_NAME: $REPO_NAME
+    SECRET_ID: $SECRET_ID
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.8
+  pre_build:
+    commands:
+      - aws --version
+      - git --version
+      - pip3 install build awscli twine 
+      - aws codeartifact login --tool twine --domain ${DOMAIN_NAME} --domain-owner ${OWNER} --repository ${REPO_NAME}
+
+  build:
+    commands:
+      - ls
+      - pwd
+      - cd ./Experiment-Broker-Module/experiment_code
+      - python3 -m build --wheel
+      - twine upload --repository codeartifact ./dist/*

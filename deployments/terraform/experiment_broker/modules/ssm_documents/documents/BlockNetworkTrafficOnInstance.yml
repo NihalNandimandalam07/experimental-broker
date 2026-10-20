@@ -1,0 +1,67 @@
+---
+description: Block all network traffice on an instance (i.e., create a Black Hole)
+schemaVersion: '2.2'
+parameters:
+  duration:
+    type: String
+    description: The amount of time (in minutes) for which the network traffic will be blocked.
+    default: "1"
+    allowedPattern: "^[0-9]+$"
+  installDependencies:
+    type: String
+    description: "If set to True, Systems Manager installs the required dependencies on the target instances. (default: True)."
+    default: 'True'
+    allowedValues:
+      - 'True'
+      - 'False'
+mainSteps:
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: installDependencies
+    description: |
+      ## Parameter: InstallDependencies
+      If set to True, this step installs the required dependecy via operating system's repository. It supports both
+      Debian (apt) and CentOS (yum) based package managers.  In this case iptables is being installed and an attempt is
+      made to start the service.  iptables should always be installed on the os by default, so this should never happen.
+    inputs:
+      runCommand:
+        - |
+          #!/bin/bash
+          if  [[ "{{ installDependencies }}" == True ]] ; then
+            if [[ "$( which iptables 2>/dev/null )" ]] ; then echo Dependency is already installed. ; exit ; fi
+            echo "Installing required dependencies"
+            if [ -f  "/etc/system-release" ] ; then
+              if sudo cat /etc/system-release | grep -i 'Amazon Linux' ; then
+                sudo amazon-linux-extras install testing
+                sudo yum -y install iptables-services
+                sudo systemctl start iptables
+                sudo systemctl start ip6tables
+                sudo systemctl enable iptables
+                sudo systemctl enable ip6tables
+              else
+                echo "There was a problem installing dependencies."
+                exit 1
+              fi
+            elif sudo cat /etc/issue | grep -i Ubuntu ; then
+              sudo apt-get update -y
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables
+              sudo ufw enable
+            else
+              echo "There was a problem installing dependencies."
+              exit 1
+            fi
+          fi
+  - action: aws:runShellScript
+    name: blockAllNetworkTraffic
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 120
+      runCommand:
+      - |
+        sudo /sbin/iptables -F
+        sudo /sbin/iptables -A INPUT -i eth0 -j DROP
+        sudo /sbin/iptables -A OUTPUT -i eth0 -j DROP
+        sudo /sbin/iptables -A FORWARD -i eth0 -j DROP

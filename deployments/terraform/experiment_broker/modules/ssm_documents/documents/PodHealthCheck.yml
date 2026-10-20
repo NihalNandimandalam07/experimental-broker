@@ -1,0 +1,105 @@
+---
+schemaVersion: '2.2'
+description: |
+  ### Document name - podHealthCheck
+  ## What does this document do?
+  ## Output Parameters
+  * None.
+parameters:
+  clustername:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z]{1,128}$'
+    default: 'blueprint'
+  namespace:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z]{1,128}$'
+    default: 'public'
+  podNamePattern:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z-]{1,128}$'
+    default: 'spring-frontend'
+  podHealthPort:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z]{1,128}$'
+    default: '80'
+  podHealthPath:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z]{1,128}$'
+    default: 'health'
+  installDependencies:
+    type: String
+    description: "If set to True, Systems Manager installs the required dependencies on the target instances. (default: True)."
+    default: 'True'
+    allowedValues:
+      - 'True'
+      - 'False'
+mainSteps:
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: installDependencies
+    description: |
+      ## Parameter: InstallDependencies
+      If set to True, this step installs the required dependecy via operating system's repository. It supports both
+      Debian (apt) and CentOS (yum) based package managers.
+    inputs:
+      runCommand:
+        - |
+        - |
+          #!/bin/bash
+          if  [[ "{{ installDependencies }}" == True ]] ; then
+            if [[ "$( which stress-ng 2>/dev/null )" ]] ; then echo Dependency is already installed. ; exit ; fi
+            echo "Installing required dependencies"
+            if [ -f  "/etc/system-release" ] ; then
+              if sudo cat /etc/system-release | grep -i 'Amazon Linux' ; then
+                sudo amazon-linux-extras install testing
+                cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
+          [kubernetes]
+          name=Kubernetes
+          baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+          EOF
+                sudo yum install -y kubectl
+              else
+                echo "There was a problem installing dependencies."
+                exit 1
+              fi
+            elif sudo cat /etc/issue | grep -i Ubuntu ; then
+              sudo apt-get update -y
+              sudo apt-get install -y ca-certificates curl
+              sudo curl -fsSLo /etc/apt/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+              echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+              sudo apt-get update -y
+              sudo apt-get install -y kubectl
+            else
+              echo "There was a problem installing dependencies."
+              exit 1
+            fi
+          fi
+          sudo aws eks --region us-east-1 update-kubeconfig --name {{ clustername }}
+
+  - action: aws:runShellScript
+    name: podHealthCheck
+    description:
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 120
+      runCommand:
+        - |
+          sudo kubectl get pods -n {{ namespace }} --no-headers=true -o wide --kubeconfig /root/.kube/config |  awk '/{{ podNamePattern }}/{print $6}' | xargs -I % wget -q -O - http://%:{{ podHealthPort }}/{{ podHealthPath }} | jq -r '.status'
+
+
+# sudo kubectl get pods -n public --no-headers=true -o wide --kubeconfig /root/.kube/config |  awk '/spring-frontend/{print $6}' | xargs -I % wget -q -O - http://%:80/health | jq -r '.status'
+
+#         kubectl get pods -n {{ namespace }} --no-headers=true | awk '/{{ podstring }}/{print $1}' | awk 'NR==1{print $1}' | xargs kubectl -n {{ namespace }}  delete pod
+#         kubectl get pods --all-namespaces --no-headers=true | awk '/dns/{print $2}' | awk 'NR==1{print $1}' | xargs kubectl -n kube-system  delete pod
+#         kubectl get pods -n resiliency --no-headers=true | awk '/authplugincontainer/{print $1}' | awk 'NR==1{print $1}' | xargs kubectl -n resiliency describe pod | more

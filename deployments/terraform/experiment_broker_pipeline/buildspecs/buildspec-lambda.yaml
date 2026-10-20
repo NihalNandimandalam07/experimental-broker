@@ -1,0 +1,37 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - mkdir temp_install
+      - cd temp_install
+      - echo "Installing Terraform..."
+      - curl -s -o terraform.zip https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip
+      - unzip terraform.zip
+      - mv terraform /usr/local/bin/
+      - terraform --version
+      - cd ..
+      - rm -rf temp_install
+  pre_build:
+    commands:
+      - pwd
+      - ls -all
+      - cd ${TF_MODULE_PATH}
+      - terraform init
+  build:
+    commands:
+      - |
+        terraform ${TF_COMMAND}
+  post_build:
+    commands:
+      - |
+        if [ -z "${OUTPUT_ARTIFACTS}" ]; then
+          echo "OUTPUT_ARTIFACTS is empty, making empty artifact"
+          OUTPUT_ARTIFACTS="empty.txt"
+          touch empty.txt
+        fi
+      - cd ~
+
+artifacts:
+  files:
+    - ./${TF_MODULE_PATH}/${OUTPUT_ARTIFACTS}

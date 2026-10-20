@@ -1,0 +1,54 @@
+version: 1.0.0
+title: regression testing sample
+configuration:
+  source_bucket: 'ebap-test'
+  source_key: 'pass.txt'
+  target_bucket: 'ebap-begin'
+  sfn_arn: 'arn:aws:states:us-east-1:899456967600:stateMachine:WaitMachine495FAF14-RPkJ3ac3MpcT'
+  retry_num: 5
+
+steady-state-hypothesis:
+    title: Check Service Status is Healthy
+    probes:
+    - type: probe
+      name: Identify Correct SFN Execution
+      tolerance: true
+      provider:
+        type: python
+        module: vr_regression_testing.general.probes
+        func: identify_sfn_execution
+        arguments:
+          retry_num: ${retry_num}
+    - type: probe
+      name: Monitor step function status
+      tolerance: true
+      provider:
+        type: python
+        module: vr_regression_testing.general.probes
+        func: watch_sfn_execution
+
+method:
+  - type: action
+    name: Introduce data
+    provider:
+      type: python
+      module: vr_regression_testing.general.actions
+      func: copy_object_s3
+      arguments:
+        source_bucket: ${source_bucket}
+        source_key: ${source_key}
+        target_bucket: ${target_bucket}
+  - type: action
+    name: Wait until previous sfn exececution completes, initiate next
+    provider:
+      type: python
+      module: vr_regression_testing.general.actions
+      func: sfn_handoff
+      arguments:
+        next_sfn_param: Wait2
+  - type: action
+    name: Final wait
+    provider:
+      type: python
+      module: vr_regression_testing.general.actions
+      func: block_until_complete

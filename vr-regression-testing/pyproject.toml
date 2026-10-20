@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "vr_regression_testing"
+version = "0.0.1"
+dependencies = [
+    'boto3',
+    'chaostoolkit-lib',
+    'botocore'
+]
+
+[tool.setuptools.packages.find]
+include = ["vr_regression_testing*"]

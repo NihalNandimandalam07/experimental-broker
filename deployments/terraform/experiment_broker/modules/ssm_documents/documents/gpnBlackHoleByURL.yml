@@ -1,0 +1,30 @@
+---
+description: Block access to a group of URLs on an instance
+schemaVersion: '2.2'
+parameters:
+  duration:
+    type: String
+    description: The duration - in seconds - of the attack. (Required)
+    default: "1"
+    allowedPattern: "^[0-9]+$"
+  urls:
+    type: String
+    description: The urls you want to block, separated by a space
+mainSteps:
+- action: aws:runShellScript
+  name: RevertCommandScheduling
+  inputs:
+    runCommand:
+- action: aws:runShellScript
+  name: AlterIptables
+  inputs:
+    runCommand:
+    - |
+      #!/bin/bash
+
+      for url in {{ urls }}; do
+        iptables -I OUTPUT 1 -d $url -j DROP;
+        iptables -I FORWARD 1 -d $url -j DROP; 
+        iptables -t mangle -I OUTPUT 1 -d $url -j DROP;
+        iptables -t mangle -I FORWARD 1 -d $url -j DROP;
+        done

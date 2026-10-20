@@ -1,0 +1,37 @@
+---
+description: Crash 1 or both of the Containers matching the containerNamePattern parameter.
+schemaVersion: '2.2'
+parameters:
+  containerNamePattern:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z_]{1,128}$'
+    default: 'k8s_coredns'
+  numContainersToTarget:
+    type: String
+    description: ""
+    allowedPattern: "^[0-9]+$"
+    default: '2'
+mainSteps:
+  - action: aws:runShellScript
+    name: PodTerminationCrash
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 180
+      runCommand:
+        - |
+          sudo -s -H <<'EOF'
+
+          echo {{ containerNamePattern }}
+
+          firstPID=$(docker ps -q | xargs docker inspect --format '{{.State.Pid}}, {{.Name}}' | awk '/{{ containerNamePattern }}/{print $1}' | awk 'NR==1{print $1}' | sed 's/,//')
+          echo "${firstPID}"
+          secondPID=$(docker ps -q | xargs docker inspect --format '{{.State.Pid}}, {{.Name}}' | awk '/{{ containerNamePattern }}/{print $1}' | awk 'NR==2{print $1}' | sed 's/,//')
+          echo "${secondPID}"
+
+          echo "Crashing Core DNS..."
+          kill -9 "${firstPID}"
+          if  [[ "{{ numContainersToTarget}}" == '2' ]] ; then
+            kill -9 "${secondPID}"
+          fi
+          EOF

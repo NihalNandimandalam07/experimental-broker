@@ -1,0 +1,105 @@
+
+---
+description: |
+  ## What does this document do?
+  Adding packet loss to the network
+  Drops 7% of packets with 25% correlation
+  ## Input Parameters
+  * Interface: The interface to add delay to (default: eth0).
+  * Loss: The percent of packet to drop (default: 7).
+  * Correlation: The correlation - in percent - with previous packet loss (default: 25).
+  * Duration: The duration - in seconds - of the test (default: 60).
+  * InstallDependencies: If set to True, Systems Manager installs the required dependencies on the target instances. (default: True).
+schemaVersion: '2.2'
+parameters:
+  interface:
+    type: String
+    description: "The interface to add delay to (default: eth0)."
+    default: "eth0"
+  portNumber:
+    type: String
+    description: |
+      The port number on which to induce the network latency. (default:80).
+      The allowed values are:
+      * PortNumber: The Port No on which the network latency is to be induced.
+    default: "0"
+  portType:
+    type: String
+    description: |
+      The port type on which to induce the network latency. (default:sport).
+      The allowed values are: dport, sport.
+    default: "sport"
+  loss:
+    type: String
+    description: "The percent of packet to drop. (default: 7)."
+    default: "7"
+  duration:
+    type: String
+    description: "The duration - in seconds - of the test (default: 60)."
+    default: "60"
+  installDependencies:
+    type: String
+    description: "If set to True, Systems Manager installs the required dependencies on the target instances. (default: True)."
+    default: 'True'
+mainSteps:
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: installDependencies
+    description: |
+      ## Parameter: installDependencies
+      If set to True, this step installs the required dependecy via operating system's repository. It supports both
+      Debian (apt) and CentOS (yum) based package managers.
+    inputs:
+      runCommand:
+        - |
+          #!/bin/bash
+          if  [[ "{{ installDependencies }}" == True ]] ; then
+            if [[ "$( which tc 2>/dev/null )" ]] ; then echo Dependency is already installed. ; exit ; fi
+            echo "Installing required dependencies"
+            if [ -f  "/etc/system-release" ] ; then
+              if sudo cat /etc/system-release | grep -i 'Amazon Linux' ; then
+                sudo amazon-linux-extras install testing
+                sudo yum -y install tc
+              else
+                echo "There was a problem installing dependencies."
+                exit 1
+              fi
+            elif sudo cat /etc/issue | grep -i Ubuntu ; then
+              sudo apt-get update -y
+              sudo DEBIAN_FRONTEND=noninteractive sudo apt-get install -y iproute2
+            else
+              echo "There was a problem installing dependencies."
+              exit 1
+            fi
+          fi
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: AlterNetworkInterface
+    description: |
+      ## Parameters: interface, loss, and duration
+      This step adds a `Loss` (in percent) to `interface` for the given `duration` (in seconds), using the `tc` (Traffic Control) command.
+      The script will inject packet drop on the network, and wait for the given duration to remove that.
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 120
+      runCommand:
+        - |
+          #!/bin/bash
+          echo "Injecting packet drop..."
+          if  [[ "{{ portNumber }}" == 0 ]] ; then
+            sudo tc qdisc add dev {{ interface }} root netem loss {{ loss }}%
+            sudo sleep {{ duration }}s
+            sudo tc qdisc del dev {{ interface }} root netem loss {{ loss }}%
+          else  
+            sudo tc qdisc add dev {{ interface }} root handle 1: prio priomap 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+            sudo tc qdisc add dev {{ interface }} parent 1:2 handle 20: netem loss {{ loss }}%
+            sudo tc filter add dev {{ interface }} parent 1:0 protocol ip u32 match ip {{portType}} {{ portNumber }} 0xffff flowid 1:2
+            sudo sleep {{ duration }}s
+            sudo tc qdisc del dev {{ interface }} root
+          fi

@@ -1,0 +1,82 @@
+---
+description: |
+  ## What does this document do?
+  It runs CPU stress on an instance via stress-ng tool.
+  ## Input Parameters
+  * duration: (Required) The duration - in seconds - of the CPU stress.
+  * cpu: Specify the number of CPU stressors to use (default 0 = all)
+  * installDependencies: If set to True, Systems Manager installs the required dependencies on the target instances. (default True)
+
+schemaVersion: '2.2'
+parameters:
+  duration:
+    type: String
+    description: "(Required) The duration - in seconds - of the CPU stress."
+    allowedPattern: "^[0-9]+$"
+    default: "60"
+  cpu:
+    type: String
+    description: 'Specify the number of CPU stressors to use (default: 0 which means "all CPUs")'
+    default: "0"
+    allowedPattern: "^[0-9]+$"
+  installDependencies:
+    type: String
+    description: 'If set to True, Systems Manager installs the required dependencies on the target instances (default: True)'
+    default: 'True'
+    allowedValues:
+      - 'True'
+      - 'False'
+mainSteps:
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: installDependencies
+    description: |
+      ## Parameter: InstallDependencies
+      If set to True, this step installs the required dependency via operating system's repository. It supports both
+      Debian (apt) and CentOS (yum) based package managers.
+    inputs:
+      runCommand:
+        - |
+          #!/bin/bash
+          if  [[ "{{ installDependencies }}" == True ]] ; then
+            if [[ "$( which stress-ng 2>/dev/null )" ]] ; then echo Dependency is already installed. ; exit ; fi
+            echo "Installing required dependencies"
+            if [ -f  "/etc/system-release" ] ; then
+              if sudo cat /etc/system-release | grep -i 'Amazon Linux' ; then
+                sudo amazon-linux-extras install testing
+                sudo yum -y install stress-ng
+              else
+                echo "There was a problem installing dependencies."
+                exit 1
+              fi
+            elif sudo cat /etc/issue | grep -i Ubuntu ; then
+              sudo apt-get update -y
+              sudo DEBIAN_FRONTEND=noninteractive sudo apt-get install -y stress-ng
+            else
+              echo "There was a problem installing dependencies."
+              exit 1
+            fi
+          fi
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: ExecuteStressNg
+    description: |
+      ## Parameters: duration and cpu
+      This step will stress the specified CPU number - or all CPUs if set to 0 (zero) - for the specified duration time
+      in seconds.
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 120
+      runCommand:
+        - |
+          if [ {{ duration }} -lt 1 ] || [ {{ duration }} -gt 43200 ] ; then echo duration parameter value must be between 1 and 43200 seconds && exit; fi
+          sudo pgrep stress-ng && echo Another stress-ng command is running, exiting... && exit
+          echo Initiating CPU stress for {{ duration }} seconds...
+          sudo stress-ng --cpu {{ cpu }} --cpu-method matrixprod -t {{ duration }}s
+          echo Finished CPU stress.

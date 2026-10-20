@@ -1,0 +1,114 @@
+---
+description: |
+  Performs a cpu stress test on one or 2 Core DNS Containers
+   on an instance via utilizing the stress-ng tool.
+  ## Input Parameters
+  * Duration: The duration - in seconds - of the memory stress (default: 60).
+  * cpu: Specify the number of CPU stressors to use (default 0 = all)
+  * InstallDependencies: If set to True, Systems Manager installs the required dependencies on the target instances. (default: True).
+schemaVersion: '2.2'
+parameters:
+  duration:
+    type: String
+    description: The amount of time which for memory will be stressed in seconds. (Required)
+    default: "60"
+  cpu:
+    type: String
+    description: 'Specify the number of CPU stressors to use (default: 0 which means "all CPUs")'
+    default: "0"
+    allowedPattern: "^[0-9]+$"
+  containerNamePattern:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z_]{1,128}$'
+    default: 'k8s_coredns'
+  numContainersToTarget:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z]{1,128}$'
+    default: '1'
+  installDependencies:
+    type: String
+    description: "If set to True, Systems Manager installs the required dependencies on the target instances. (default: True)."
+    default: 'True'
+    allowedValues:
+      - 'True'
+      - 'False'
+mainSteps:
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: installDependencies
+    description: |
+      ## Parameter: InstallDependencies
+      If set to True, this step installs the required dependecy via operating system's repository. It supports both
+      Debian (apt) and CentOS (yum) based package managers.  In this case iptables is being installed and an attempt is
+      made to start the service.  iptables should always be installed on the os by default, so this should never happen.
+    inputs:
+      runCommand:
+        - |
+        - |
+          #!/bin/bash
+          if  [[ "{{ installDependencies }}" == True ]] ; then
+            if [[ "$( which stress-ng 2>/dev/null )" ]] ; then echo Dependency is already installed. ; exit ; fi
+            echo "Installing required dependencies"
+            if [ -f  "/etc/system-release" ] ; then
+              if sudo cat /etc/system-release | grep -i 'Amazon Linux' ; then
+                sudo amazon-linux-extras install testing
+                sudo yum -y install stress-ng
+              else
+                echo "There was a problem installing dependencies."
+                exit 1
+              fi
+            elif sudo cat /etc/issue | grep -i Ubuntu ; then
+              sudo apt-get update -y
+              sudo DEBIAN_FRONTEND=noninteractive sudo apt-get install -y stress-ng
+            else
+              echo "There was a problem installing dependencies."
+              exit 1
+            fi
+          fi
+
+  - action: aws:runShellScript
+    name: StressCPU
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 180
+      runCommand:
+        - |
+          sudo -s -H <<'EOF'
+
+          if [ {{ duration }} -lt 1 ] || [ {{ duration }} -gt 43200 ] ; then echo Duration parameter value must be between 1 and 43200 seconds && exit; fi
+
+          echo {{ containerNamePattern }}
+
+          firstPid=$(docker ps -q | xargs docker inspect --format '{{.State.Pid}}, {{.Name}}' | awk '/{{ containerNamePattern }}/{print $1}' | awk 'NR==1{print $1}' | sed 's/,//')
+          echo "${firstPid}"
+          secondPid=$(docker ps -q | xargs docker inspect --format '{{.State.Pid}}, {{.Name}}' | awk '/{{ containerNamePattern }}/{print $1}' | awk 'NR==2{print $1}' | sed 's/,//')
+          echo "${secondPid}"
+
+          if [ -z "$firstPid" ]
+          then
+            echo "firstPid is NULL"
+            exit 0
+          fi
+
+          echo Initiating CPU stress for {{ duration }} seconds...
+
+          nsenter -t ${firstPid} -n sudo pgrep stress-ng && echo Another stress-ng command is running, exiting... && exit
+
+          nsenter -t ${firstPid} -n sudo stress-ng --cpu {{ cpu }} --cpu-method matrixprod -t {{ duration }}s 
+          echo Finished CPU stress.
+
+          if  [[ "{{ numContainersToTarget}}" == '2' ]] ; then
+            echo "Two containers are being targeted on this test..."
+
+            nsenter -t ${secondPid} -n sudo pgrep stress-ng && echo Another stress-ng command is running, exiting... && exit
+
+            nsenter -t ${secondPid} -n sudo stress-ng --cpu {{ cpu }} --cpu-method matrixprod -t {{ duration }}s 
+            echo Finished CPU stress.
+          fi
+
+          EOF

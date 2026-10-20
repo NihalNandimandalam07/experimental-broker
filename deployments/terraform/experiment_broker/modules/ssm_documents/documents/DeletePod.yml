@@ -1,0 +1,41 @@
+---
+schemaVersion: '2.2'
+description: |
+  ### Document name - AWSFIS-Run-PacketLoss
+  ## What does this document do?
+  ## Output Parameters
+  None.
+parameters:
+  namespace:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z]{1,128}$'
+    default: 'resiliency'
+  podNamePattern:
+    type: String
+    description: ""
+    allowedPattern: '^[0-9a-zA-Z-]{1,128}$'
+    default: 'authplugincontainer'
+  installDependencies:
+    type: String
+    description: "If set to True, Systems Manager installs the required dependencies on the target instances. (default: True)."
+    default: 'True'
+    allowedValues:
+      - 'True'
+      - 'False'
+mainSteps:
+  - action: aws:runShellScript
+    name: deletePod
+    description: |
+      ## Parameters: Portnumber,Time
+    inputs:
+      maxAttempts: 1
+      timeoutSeconds: 120
+      runCommand:
+        - |
+          kubectl get pods -n {{ namespace }} --no-headers=true | awk '/{{ podNamePattern }}/{print $2}' | awk 'NR==1{print $1}' | xargs kubectl -n {{ namespace }}  delete pod
+
+#          kubectl get pods --all-namespaces --no-headers=true | awk '/dns/{print $2}' | awk 'NR==1{print $1}' | xargs kubectl -n kube-system  delete pod
+
+#         kubectl get pods -n resiliency --no-headers=true | awk '/authplugincontainer/{print $1}' | awk 'NR==1{print $1}' | xargs kubectl -n resiliency describe pod | more
+

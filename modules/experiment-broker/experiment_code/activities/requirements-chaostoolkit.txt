@@ -1,0 +1,4 @@
+chaostoolkit==1.16.0
+chaostoolkit-aws==0.29.0
+chaostoolkit-kubernetes==0.34.1
+chaostoolkit-lib==1.41.0

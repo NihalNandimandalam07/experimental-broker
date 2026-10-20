@@ -1,0 +1,36 @@
+---
+description: |
+  ## What does this document do?
+  Installs Stress-NG on a pod
+
+schemaVersion: '2.2'
+mainSteps:
+  - action: aws:runShellScript
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    name: installStressNG
+    description: |
+      This step installs the required dependecy via a bash script.
+    inputs:
+      runCommand:
+        - |
+          #/bin/bash
+          DIR="/tmp/resiliency/"
+          POD=$(sudo -u admin kubectl get pods -n resiliency | grep authplugincontainer | awk '{print $1}')
+
+          if /bin/mkdir $DIR; then
+            if sudo -u admin kubectl exec -it --namespace resiliency $POD -- /bin/mkdir $DIR; then
+
+              cd $DIR
+              apt-get download $(apt-cache depends --recurse --no-recommends --no-suggests \
+              --no-conflicts --no-breaks --no-replaces --no-enhances \
+              --no-pre-depends stress-ng| grep "^\w" | egrep -v "gcc|libc6|zlib")
+              for package in ./*deb; do
+                sudo -u admin kubectl cp $package resiliency/$POD:$DIR; done
+                    sudo -u admin kubectl exec -it --namespace resiliency $POD -- /bin/bash -c 'dpkg -i '$DIR'*.deb'
+            fi
+          fi
+          
+ 
