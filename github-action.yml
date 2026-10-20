@@ -1,0 +1,16 @@
+name: Experiment Pipeline Github Action
+run-name: ${{ github.actor }} is deploying the Experiment Pipeline 🚀
+on: [push]
+jobs:
+  Explore-GitHub-Actions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+      - name: List files in the repository
+        run: |
+          ls ${{ github.workspace }}
+      - name: Deploy Pipeline
+        run: |
+          terraform init
+          terraform apply
