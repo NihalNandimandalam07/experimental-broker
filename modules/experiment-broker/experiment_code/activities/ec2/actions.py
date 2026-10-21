@@ -13,7 +13,7 @@ from activities.enums import ParameterMapFailuremode
 from chaoslib import ActivityFailed
 from datetime import datetime, timedelta
 from typing import List
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, WaiterError
 from activities.ec2.shared import (
     get_test_instance_ids,
     get_role_from_instance_profile,
@@ -775,6 +775,79 @@ def terminate_instance(
     except ClientError as e:
         logger.error(e)
         raise
+
+
+def _change_instance_state(
+    instance_id: str,
+    region: str,
+    wait: bool,
+    timeout: int,
+    operation: str,
+    response_key: str,
+    waiter_name: str,
+) -> dict:
+    function_name = inspect.stack()[1][3]
+    ec2client = boto3.client("ec2", region_name=region)
+
+    try:
+        response = getattr(ec2client, operation)(InstanceIds=[instance_id])
+        change = response[response_key][0]
+        logger.info(
+            f"{function_name}(): {instance_id} "
+            f"{change['PreviousState']['Name']} -> {change['CurrentState']['Name']}"
+        )
+        if wait:
+            ec2client.get_waiter(waiter_name).wait(
+                InstanceIds=[instance_id],
+                WaiterConfig={"Delay": 15, "MaxAttempts": max(1, timeout // 15)},
+            )
+            logger.info(f"{function_name}(): {instance_id} reached {waiter_name}")
+    except (ClientError, WaiterError) as e:
+        logger.error(f"{function_name}(): {instance_id} failed: {e}")
+        raise ActivityFailed(f"{function_name}() failed for {instance_id}: {e}")
+
+    return {
+        "instance_id": instance_id,
+        "previous_state": change["PreviousState"]["Name"],
+        "current_state": change["CurrentState"]["Name"],
+    }
+
+
+def stop_ec2_instance(
+    instance_id: str,
+    region: str = "us-east-2",
+    wait: bool = True,
+    timeout: int = 300,
+) -> dict:
+    """Stop a single EC2 instance, optionally waiting until it is stopped."""
+    return _change_instance_state(
+        instance_id,
+        region,
+        wait,
+        timeout,
+        operation="stop_instances",
+        response_key="StoppingInstances",
+        waiter_name="instance_stopped",
+    )
+
+
+def start_ec2_instance(
+    instance_id: str,
+    region: str = "us-east-2",
+    wait: bool = True,
+    timeout: int = 300,
+) -> dict:
+    """Start a single EC2 instance, optionally waiting until it is running.
+    Safe to use as a rollback: starting a running instance is a no-op."""
+    return _change_instance_state(
+        instance_id,
+        region,
+        wait,
+        timeout,
+        operation="start_instances",
+        response_key="StartingInstances",
+        waiter_name="instance_running",
+    )
 
 
 if __name__ == "__main__":

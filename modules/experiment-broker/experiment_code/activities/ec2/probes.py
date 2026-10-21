@@ -1,10 +1,7 @@
-import sys
 import boto3
-import time
 import inspect
 
 from logzero import logger
-from re import I
 
 from activities.ec2.shared import get_test_instance_ids
 from botocore.exceptions import ClientError
@@ -42,4 +39,44 @@ def assert_instance_rebuilt(
     if terminated_count == pending_count:
         return True
     else:
+        return False
+
+
+def check_ec2_instance_running(
+    instance_id: str,
+    region: str = "us-east-2"
+) -> bool:
+    """
+    Check whether an EC2 instance is running.
+    """
+
+    try:
+        ec2_client = boto3.client(
+            "ec2",
+            region_name=region
+        )
+
+        response = ec2_client.describe_instances(
+            InstanceIds=[instance_id]
+        )
+
+        for reservation in response.get("Reservations", []):
+            for instance in reservation.get("Instances", []):
+                state = instance["State"]["Name"]
+
+                logger.info(
+                    f"EC2 instance {instance_id} state: {state}"
+                )
+
+                return state == "running"
+
+        logger.error(
+            f"EC2 instance {instance_id} not found"
+        )
+        return False
+
+    except ClientError as e:
+        logger.error(
+            f"Failed to check EC2 instance {instance_id}: {e}"
+        )
         return False

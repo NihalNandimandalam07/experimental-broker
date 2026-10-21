@@ -12,7 +12,7 @@ resource "aws_lambda_function" "experiment_lambda" {
   timeout       = 600
 
   s3_bucket = var.package_build_bucket
-  s3_key    = aws_s3_object.lambda_file.id
+  s3_key    = aws_s3_object.lambda_file.key
 
   source_code_hash = data.local_file.lambda_zip.content_md5
   environment {

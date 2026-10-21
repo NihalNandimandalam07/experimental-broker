@@ -8,7 +8,7 @@ import traceback
 
 from datetime import datetime
 from activities.opensearch.shared import upload_experiment_journal
-from activities.s3.shared import get_object, create_presigned_url, put_object
+from activities.s3.shared import get_object, put_object
 from chaoslib.experiment import run_experiment
 from chaoslib.loader import load_experiment
 from logzero import logger
@@ -36,16 +36,17 @@ def handler(event, context):
         logger.info("ChaosToolkit attempting to load experiment: %s", experiment_source)
 
     try:
-        get_object(
+        experiment_obj = get_object(
             bucket_name=event.get("bucket_name"),
             filename=experiment_source,
             configuration=event.get("configuration", {}),
         )
+        local_path = os.path.join("/tmp", os.path.basename(experiment_source))
+        experiment_obj.download_file(local_path)
     except Exception as e:
         logger.exception("Unable to retrieve experiment %s: %s", experiment_source, e)
         raise
-    url = create_presigned_url(event.get("bucket_name"), experiment_source)
-    experiment = load_experiment(url)
+    experiment = load_experiment(local_path)
 
     # experiment_journal = run_experiment(experiment, strategy=Strategy.DURING_METHOD, schedule=Schedule(continuous_hypothesis_frequency=15, fail_fast=True))
     experiment_journal = run_experiment(experiment)

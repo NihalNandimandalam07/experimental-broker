@@ -1,0 +1,59 @@
+version: 1.0.0
+title: EC2-Stop-Start
+description: Stop a single EC2 instance, confirm it is down, then start it again and verify it recovers to running.
+configuration:
+  instance_id: 'i-0598410b337729dc9'
+  aws_region: 'us-east-2'
+steady-state-hypothesis:
+  title: EC2 instance is running
+  probes:
+    - type: probe
+      name: instance-is-running
+      tolerance: true
+      provider:
+        type: python
+        module: activities.ec2.probes
+        func: check_ec2_instance_running
+        arguments:
+          instance_id: ${instance_id}
+          region: ${aws_region}
+method:
+  - type: action
+    name: stop-ec2-instance
+    provider:
+      type: python
+      module: activities.ec2.actions
+      func: stop_ec2_instance
+      arguments:
+        instance_id: ${instance_id}
+        region: ${aws_region}
+  - type: probe
+    name: instance-is-stopped
+    provider:
+      type: python
+      module: activities.ec2.probes
+      func: check_ec2_instance_running
+      arguments:
+        instance_id: ${instance_id}
+        region: ${aws_region}
+  - type: action
+    name: start-ec2-instance
+    provider:
+      type: python
+      module: activities.ec2.actions
+      func: start_ec2_instance
+      arguments:
+        instance_id: ${instance_id}
+        region: ${aws_region}
+    pauses:
+      after: 30
+rollbacks:
+  - type: action
+    name: ensure-ec2-instance-started
+    provider:
+      type: python
+      module: activities.ec2.actions
+      func: start_ec2_instance
+      arguments:
+        instance_id: ${instance_id}
+        region: ${aws_region}

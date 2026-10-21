@@ -26,3 +26,10 @@ terraform/lambda_infra/build_temp
 build
 .pytest_cache
 prospector.txt
+.venv/
+.venv-chaos/
+tfplan
+journal*.json
+**/build_temp/
+chaostoolkit.log
+journal*.json

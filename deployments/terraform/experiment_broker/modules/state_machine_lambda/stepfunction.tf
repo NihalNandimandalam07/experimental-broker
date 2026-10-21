@@ -69,12 +69,12 @@ data "aws_iam_policy_document" "step_function_policy_document" {
 }
 
 resource "aws_iam_role" "step_function_role" {
-  name               = "experiment-broker-step-function-role"
+  name               = "${var.state_machine_name}-role"
   assume_role_policy = data.aws_iam_policy_document.step_function_assume_role_policy_document.json
 }
 
 resource "aws_iam_policy" "step_function_policy" {
-  name   = "experiment-broker-step-function-policy"
+  name   = "${var.state_machine_name}-policy"
   policy = data.aws_iam_policy_document.step_function_policy_document.json
 }
 

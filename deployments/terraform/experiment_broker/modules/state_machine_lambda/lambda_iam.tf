@@ -112,7 +112,7 @@ data "aws_iam_policy_document" "experiment_lambda_policy_document" {
 }
 
 resource "aws_iam_policy" "experiment_lambda_policy" {
-  name   = "experiment-lambda-policy"
+  name   = "${var.lambda_name}-policy"
   policy = data.aws_iam_policy_document.experiment_lambda_policy_document.json
 }
 
